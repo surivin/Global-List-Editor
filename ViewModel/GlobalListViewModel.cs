@@ -1,4 +1,5 @@
-﻿using Microsoft.Win32; // For SaveFileDialog
+﻿using Global_List_Editor.Model;
+using Microsoft.Win32; // For SaveFileDialog
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -11,6 +12,7 @@ using System.Threading.Tasks;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Markup;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace Global_List_Editor.ViewModel
@@ -25,8 +27,18 @@ namespace Global_List_Editor.ViewModel
         private List<string> _exportedListItems;
         private string _globalListSearchText;
         private string _exportedListItemsSearchText;
-        private string _downloadLocation; 
+        private string _downloadLocation;
 
+        private bool _isLoading;
+        public bool IsLoading
+        {
+            get { return _isLoading; }
+            set
+            {
+                _isLoading = value;
+                OnPropertyChanged(nameof(IsLoading));
+            }
+        }
         public Model.GLOBALLISTS GlobalLists
         {
             get { return _globalLists; }
@@ -58,13 +70,27 @@ namespace Global_List_Editor.ViewModel
                     _selectedEnvironment = trimmed;
                     OnPropertyChanged(nameof(SelectedEnvironment));
                     FetchEnvironmentUrl();
+                    FetchDownloadLocation();
 
-                    // Automatically list global lists when environment changes
-                    if (_selectedEnvironment != null && !string.IsNullOrWhiteSpace(EnvironmentUrl))
-                        ExecuteListAllGlobalListNames(null);
+                    IsLoading = true;
+                    //call the long running method on a background thread...
+                    Task.Run(() =>
+                    {
+                        Thread.Sleep(1000);
+
+                        // Automatically list global lists when environment changes
+                        if (_selectedEnvironment != null && !string.IsNullOrWhiteSpace(EnvironmentUrl))
+                            ExecuteListAllGlobalListNames(null);
+                    }).ContinueWith(task =>
+                        {
+                            //and set the IsLoading property back to false back on the UI thread once the task has finished
+                            IsLoading = false;
+                        }, System.Threading.CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.FromCurrentSynchronizationContext());
                 }
+
             }
         }
+
 
         public string EnvironmentUrl
         {
@@ -166,10 +192,6 @@ namespace Global_List_Editor.ViewModel
             ExportedListItems != null &&
             ExportedListItems.Any(item => item.Equals(ExportedListItemsSearchText, StringComparison.OrdinalIgnoreCase));
 
-        //public ICommand ListAllGlobalListNamesCommand { get; }
-
-        //public ICommand ExportSelectedGlobalListCommand { get; }
-
         public ICommand ApplyChangesToAzureServer { get; }
 
         public ICommand DownloadEntireGlobalList { get; }
@@ -184,25 +206,7 @@ namespace Global_List_Editor.ViewModel
                 items.Add(newItem);
                 ExportedListItems = items;
 
-                // Save to file
-                string fileName = $"{SelectedGlobalList.Name}.xml";
-                string filePath = System.IO.Path.Combine(Environment.CurrentDirectory, "output", fileName);
-
-                // Load or create XML
-                XDocument doc;
-                if (System.IO.File.Exists(filePath))
-                {
-                    doc = XDocument.Load(filePath);
-                }
-                else
-                {
-                    doc = new XDocument(new XElement("GLOBALLIST", new XAttribute("name", SelectedGlobalList.Name)));
-                }
-
-                // Add new item
-                var root = doc.Root;
-                root.Add(new XElement("LISTITEM", new XAttribute("value", newItem)));
-                doc.Save(filePath);
+                AddOrDeleteListItem(newItem, true);
 
                 // Optionally, update the in-memory model as well
                 if (SelectedGlobalList.ListItem == null)
@@ -226,20 +230,7 @@ namespace Global_List_Editor.ViewModel
                 {
                     ExportedListItems = items;
 
-                    // Save to file
-                    string fileName = $"{SelectedGlobalList.Name}.xml";
-                    string filePath = System.IO.Path.Combine(Environment.CurrentDirectory, "output", fileName);
-
-                    if (System.IO.File.Exists(filePath))
-                    {
-                        var doc = XDocument.Load(filePath);
-                        var listItems = doc.Descendants("LISTITEM")
-                            .Where(x => (string)x.Attribute("value") == itemToDelete)
-                            .ToList();
-                        foreach (var x in listItems)
-                            x.Remove();
-                        doc.Save(filePath);
-                    }
+                    AddOrDeleteListItem(itemToDelete, false);
 
                     // Optionally, update the in-memory model as well
                     if (SelectedGlobalList.ListItem != null)
@@ -256,8 +247,6 @@ namespace Global_List_Editor.ViewModel
         public GlobalListViewModel()
         {
             _globalLists = new Model.GLOBALLISTS(); // Initialize the global lists model
-            //ListAllGlobalListNamesCommand = new RelayCommand(ExecuteListAllGlobalListNames);
-            //ExportSelectedGlobalListCommand = new RelayCommand(ExecuteExportSelectedGlobalList, CanExportGlobalList);
             ApplyChangesToAzureServer = new RelayCommand(ExcecuteApplyChnagesToAzureServer, CanApplyChangesToAzureServer);
             DownloadEntireGlobalList = new RelayCommand(ExcecuteDownloadEntireGlobalList, CanDownloadEntireGlobalList);
 
@@ -275,12 +264,7 @@ namespace Global_List_Editor.ViewModel
 
         private bool CanDownloadEntireGlobalList(object obj)
         {
-            if (string.IsNullOrWhiteSpace(SelectedEnvironment) || string.IsNullOrEmpty(EnvironmentUrl))
-            {
-                return false;
-            }
-
-            if(string.IsNullOrWhiteSpace(DownloadLocation))
+            if (string.IsNullOrWhiteSpace(SelectedEnvironment) || string.IsNullOrEmpty(EnvironmentUrl) || string.IsNullOrWhiteSpace(DownloadLocation))
             {
                 return false;
             }
@@ -332,66 +316,47 @@ namespace Global_List_Editor.ViewModel
 
         private bool CanApplyChangesToAzureServer(object obj)
         {
-            if(string.IsNullOrWhiteSpace(SelectedEnvironment) || string.IsNullOrEmpty(EnvironmentUrl))
+            if (string.IsNullOrWhiteSpace(SelectedEnvironment) || string.IsNullOrEmpty(EnvironmentUrl) || string.IsNullOrEmpty(DownloadLocation))
             {
                 //System.Windows.MessageBox.Show("Please select an environment first.", "Apply Changes");
                 return false;
             }
-            if (Directory.Exists(System.IO.Path.Combine(Environment.CurrentDirectory, "output")))
-            {
-                if (Directory.GetFiles(System.IO.Path.Combine(Environment.CurrentDirectory, "output"), "*.xml").Length > 0)
-                {
-                    return true;
-                }
-                else
-                {
-                    //System.Windows.MessageBox.Show("No changes to apply. Please export a global list first.", "Apply Changes");
-                    return false;
-                }
-            }
-            else
-            {
-                //System.Windows.MessageBox.Show("Output directory does not exist. Please ensure the application has exported global lists.", "Apply Changes");
-                return false;
-            }
+            return true;
         }
 
         private void ExcecuteApplyChnagesToAzureServer(object obj)
         {
-            foreach(var file in Directory.GetFiles(System.IO.Path.Combine(Environment.CurrentDirectory, "output"), "*.xml"))
+            try
             {
-                try
+                var process = new Process
                 {
-                    var process = new Process
+                    StartInfo = new ProcessStartInfo
                     {
-                        StartInfo = new ProcessStartInfo
-                        {
-                            FileName = "witadmin",
-                            Arguments = $"/importgloballist /collection:{EnvironmentUrl} /f:\"{file}\"",
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            UseShellExecute = false,
-                            CreateNoWindow = true
-                        }
-                    };
-                    process.Start();
-                    string output = process.StandardOutput.ReadToEnd();
-                    string error = process.StandardError.ReadToEnd();
-                    process.WaitForExit();
+                        FileName = "witadmin",
+                        Arguments = $"/importgloballist /collection:{EnvironmentUrl} /f:\"{DownloadLocation}\"",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+                process.Start();
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+                process.WaitForExit();
 
-                    if (process.ExitCode == 0)
-                    {
-                        System.Windows.MessageBox.Show($"Global list imported successfully from:\n{file}", "Import Global List");
-                    }
-                    else
-                    {
-                        System.Windows.MessageBox.Show($"Import failed: {error}", "Import Global List");
-                    }
-                }
-                catch (Exception ex)
+                if (process.ExitCode == 0)
                 {
-                    System.Windows.MessageBox.Show($"Error: {ex.Message}", "Import Global List");
+                    System.Windows.MessageBox.Show($"Global list imported successfully from:\n{DownloadLocation}", "Import Global List");
                 }
+                else
+                {
+                    System.Windows.MessageBox.Show($"Import failed: {error}", "Import Global List");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"Error: {ex.Message}", "Import Global List");
             }
         }
 
@@ -413,7 +378,7 @@ namespace Global_List_Editor.ViewModel
             if (!string.IsNullOrWhiteSpace(SelectedEnvironment))
             {
                 string key = $"{SelectedEnvironment}DownloadLocation";
-                DownloadLocation = ConfigurationManager.AppSettings[key] ?? string.Empty;
+                DownloadLocation = Path.Combine(ConfigurationManager.AppSettings[key], "GlobalList.xml") ?? string.Empty;
             }
             else
             {
@@ -421,36 +386,112 @@ namespace Global_List_Editor.ViewModel
             }
         }
 
-        private bool CanExportGlobalList(object parameter)
+
+        private List<GLOBALLIST> GetGlobalListNames()
         {
-            return SelectedGlobalList != null && !string.IsNullOrWhiteSpace(EnvironmentUrl);
+            var globalListNames = new List<GLOBALLIST>();
+            string xmlPath = DownloadLocation; // Replace with your actual path
+            XmlDocument doc = new XmlDocument();
+            doc.Load(xmlPath);
+
+            XmlNamespaceManager nsMgr = new XmlNamespaceManager(doc.NameTable);
+            nsMgr.AddNamespace("gl", "http://schemas.microsoft.com/VisualStudio/2005/workitemtracking/globallists");
+
+            XmlNodeList globalLists = doc.SelectNodes("//GLOBALLIST", nsMgr);
+            foreach (XmlNode list in globalLists)
+            {
+                string listName = list.Attributes["name"]?.Value;
+                globalListNames.Add(new Model.GLOBALLIST { Name = listName });
+            }
+            return globalListNames;
         }
 
-        private void ExecuteExportSelectedGlobalList(object parameter)
+        private List<string> GetListItemsForGlobalListName()
         {
-            if (SelectedGlobalList == null)
+            var globalListItemValues = new List<string>();
+            string xmlPath = DownloadLocation; // Replace with your actual path
+            XmlDocument doc = new XmlDocument();
+            doc.Load(xmlPath);
+
+            XmlNamespaceManager nsMgr = new XmlNamespaceManager(doc.NameTable);
+            nsMgr.AddNamespace("gl", "http://schemas.microsoft.com/VisualStudio/2005/workitemtracking/globallists");
+
+            XmlNodeList globalLists = doc.SelectNodes("//GLOBALLIST", nsMgr);
+            foreach (XmlNode list in globalLists)
             {
-                System.Windows.MessageBox.Show("Please select a global list to export.", "Export Global List");
-                return;
+                string listName = list.Attributes["name"]?.Value;
+                if (listName == SelectedGlobalList.Name)
+                {
+                    XmlNodeList items = list.SelectNodes("LISTITEM", nsMgr);
+                    foreach (XmlNode item in items)
+                    {
+                        string value = item.Attributes["value"]?.Value;
+                        globalListItemValues.Add(value);
+                    }
+                }
+            }
+            return globalListItemValues;
+        }
+
+        private void AddOrDeleteListItem(string value, bool add)
+        {
+            string xmlPath = DownloadLocation;
+            XmlDocument doc = new XmlDocument();
+            doc.Load(xmlPath);
+
+            XmlNamespaceManager nsMgr = new XmlNamespaceManager(doc.NameTable);
+            nsMgr.AddNamespace("gl", "http://schemas.microsoft.com/VisualStudio/2005/workitemtracking/globallists");
+
+            // 🔍 Target the specific global list
+            XmlNode targetList = doc.SelectSingleNode($"//GLOBALLIST[@name='{SelectedGlobalList.Name}']", nsMgr);
+
+            if (targetList != null)
+            {
+                if (add)
+                {
+                    // ✅ Add a new item
+                    XmlNode newItem = doc.CreateElement("LISTITEM");
+                    XmlAttribute attr = doc.CreateAttribute("value");
+                    attr.Value = value;
+                    newItem.Attributes.Append(attr);
+                    targetList.AppendChild(newItem);
+                }
+                else
+                {
+                    // ❌ Remove an existing item
+                    XmlNode itemToRemove = targetList.SelectSingleNode($"LISTITEM[@value='{value}']", nsMgr);
+                    if (itemToRemove != null)
+                    {
+                        targetList.RemoveChild(itemToRemove);
+                    }
+                }
+                // 💾 Save the updated document
+                doc.Save(xmlPath);
+            }
+            else
+            {
+                Console.WriteLine("Target GLOBALLIST not found.");
             }
 
-            string fileName = $"{SelectedGlobalList.Name}.xml";
-            string filePath = System.IO.Path.Combine(Environment.CurrentDirectory, fileName);
+        }
 
-            string collectionArg = $"/collection:{EnvironmentUrl}";
-            string nameArg = $"/n:{SelectedGlobalList.Name}";
-            string fileArg = $"/f:\"{filePath}\"";
-
+        private void ExecuteListAllGlobalListNames(object parameter)
+        {
             try
             {
+                // Use the EnvironmentUrl as the collection argument if available
+                string collectionArg = !string.IsNullOrWhiteSpace(EnvironmentUrl)
+                    ? $"/collection:{EnvironmentUrl}"
+                    : string.Empty;
+                string fileArg = $"/f:\"{DownloadLocation}\"";
+
                 var process = new Process
                 {
                     StartInfo = new ProcessStartInfo
                     {
                         FileName = "witadmin",
-                        Arguments = $"exportgloballist {collectionArg} {nameArg} {fileArg}",
+                        Arguments = $"exportgloballist {collectionArg} {fileArg}".Trim(),
                         RedirectStandardOutput = true,
-                        RedirectStandardError = true,
                         UseShellExecute = false,
                         CreateNoWindow = true
                     }
@@ -458,104 +499,9 @@ namespace Global_List_Editor.ViewModel
 
                 process.Start();
                 string output = process.StandardOutput.ReadToEnd();
-                string error = process.StandardError.ReadToEnd();
                 process.WaitForExit();
 
-                if (process.ExitCode == 0)
-                {
-                    // Parse the exported XML and update ExportedListItems
-                    ExportedListItems = ParseExportedGlobalList(filePath);
-                    System.Windows.MessageBox.Show($"Global list exported and loaded successfully from:\n{filePath}", "Export Global List");
-                }
-                else
-                {
-                    System.Windows.MessageBox.Show($"Export failed: {error}", "Export Global List");
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Windows.MessageBox.Show($"Error: {ex.Message}", "Export Global List");
-            }
-        }
-
-        private List<string> ParseExportedGlobalList(string filePath)
-        {
-            try
-            {
-                var doc = XDocument.Load(filePath);
-                // Adjust the namespace if needed
-                XNamespace gl = "http://schemas.microsoft.com/VisualStudio/2005/workitemtracking/globallist";
-                var items = doc.Descendants("LISTITEM")
-                    .Select(x => (string)x.Attribute("value"))
-                    .Where(v => !string.IsNullOrWhiteSpace(v))
-                    .ToList();
-
-                // If namespace is present, use:
-                // var items = doc.Descendants(gl + "LISTITEM")
-                //     .Select(x => (string)x.Attribute("value"))
-                //     .Where(v => !string.IsNullOrWhiteSpace(v))
-                //     .ToList();
-
-                return items;
-            }
-            catch
-            {
-                return new List<string>();
-            }
-        }
-
-        private void ExecuteListAllGlobalListNames(object parameter)
-        {
-            try
-            {
-                //// Use the EnvironmentUrl as the collection argument if available
-                //string collectionArg = !string.IsNullOrWhiteSpace(EnvironmentUrl)
-                //    ? $"/collection:{EnvironmentUrl}"
-                //    : string.Empty;
-
-                //var process = new Process
-                //{
-                //    StartInfo = new ProcessStartInfo
-                //    {
-                //        FileName = "witadmin",
-                //        Arguments = $"listgloballist {collectionArg}".Trim(),
-                //        RedirectStandardOutput = true,
-                //        UseShellExecute = false,
-                //        CreateNoWindow = true
-                //    }
-                //};
-
-                //process.Start();
-                //string output = process.StandardOutput.ReadToEnd();
-                //process.WaitForExit();
-
-                //var list = output
-                //    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                //    .Select(name => new Model.GLOBALLIST { Name = name })
-                //    .ToList();
-
-                // Initialize _globalLists with dummy data
-                _globalLists.GlobalList = new List<Model.GLOBALLIST>();
-                _globalLists.GlobalList.Add(new Model.GLOBALLIST
-                {
-                    Name = "SampleList1",
-                    ListItem = new List<Model.GLOBALLISTLISTITEM>
-                        {
-                            new Model.GLOBALLISTLISTITEM { Value = "Item 1.1" },
-                            new Model.GLOBALLISTLISTITEM { Value = "Item 1.2" },
-                            new Model.GLOBALLISTLISTITEM { Value = "Item 1.3" },
-                        }
-                });
-                _globalLists.GlobalList.Add(new Model.GLOBALLIST
-                {
-                    Name = "SampleList2",
-                    ListItem = new List<Model.GLOBALLISTLISTITEM>
-                        {
-                            new Model.GLOBALLISTLISTITEM { Value = "Item 2.1" },
-                            new Model.GLOBALLISTLISTITEM { Value = "Item 2.2" },
-                        }
-                });
-                var list = _globalLists.GlobalList; // Use the existing global list for now
+                var list = GetGlobalListNames();
 
                 GlobalLists.GlobalList = list;
                 OnPropertyChanged(nameof(FilteredGlobalLists));
@@ -563,51 +509,24 @@ namespace Global_List_Editor.ViewModel
             }
             catch (Exception ex)
             {
+                var list = GetGlobalListNames();
+
+                GlobalLists.GlobalList = list;
+                OnPropertyChanged(nameof(FilteredGlobalLists));
+                OnPropertyChanged(nameof(GlobalLists));
                 System.Windows.MessageBox.Show($"Error: {ex.Message}", "Error");
             }
         }
 
         private void ExportAndLoadSelectedGlobalListValues()
         {
-            string fileName = $"{SelectedGlobalList.Name}.xml";
-            string filePath = System.IO.Path.Combine(Environment.CurrentDirectory, fileName);
-
-            string collectionArg = $"/collection:{EnvironmentUrl}";
-            string nameArg = $"/n:{SelectedGlobalList.Name}";
-            string fileArg = $"/f:\"{filePath}\"";
-
             try
             {
-                var process = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "witadmin",
-                        Arguments = $"exportgloballist {collectionArg} {nameArg} {fileArg}",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    }
-                };
-
-                process.Start();
-                string output = process.StandardOutput.ReadToEnd();
-                string error = process.StandardError.ReadToEnd();
-                process.WaitForExit();
-
-                if (process.ExitCode == 0)
-                {
-                    ExportedListItems = ParseExportedGlobalList(filePath);
-                }
-                else
-                {
-                    ExportedListItems = new List<string>();
-                }
+                ExportedListItems = GetListItemsForGlobalListName();
             }
             catch
             {
-                ExportedListItems = ParseExportedGlobalList(filePath);// new List<string>();
+                ExportedListItems = new List<string>();
             }
         }
 

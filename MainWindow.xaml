@@ -41,9 +41,11 @@
             <ColumnDefinition Width="2*"/>
             <ColumnDefinition Width="3*"/>
         </Grid.ColumnDefinitions>
-
+        <Grid Background="Gray" Grid.ColumnSpan="2" Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center">Loading...</TextBlock>
+        </Grid>
         <!-- Environment selection -->
-        <ComboBox Grid.Column="0"
+        <ComboBox Grid.Row="1" Grid.Column="0"
                   ItemsSource="{Binding Environments}"
                   SelectedItem="{Binding SelectedEnvironment, Mode=TwoWay}"
                   HorizontalAlignment="Stretch"
@@ -53,7 +55,7 @@
                   Padding="8,6" />
 
         <!-- Collection URL display -->
-        <TextBlock Grid.Row="0" Grid.Column="1"
+        <TextBlock Grid.Row="1" Grid.Column="1"
                  Text="{Binding EnvironmentUrl}"                  
                  HorizontalAlignment="Stretch"
                  VerticalAlignment="Center"
@@ -147,7 +149,7 @@
         </StackPanel>
 
 
-        <Button Grid.Column="0" Grid.Row="3"                            
+        <Button Grid.Column="1" Grid.Row="3"                            
             Content="Apply Changes to Server"
             Width="250"
             Height="24"
@@ -156,12 +158,12 @@
             Command="{Binding ApplyChangesToAzureServer}" />
 
 
-        <Button Grid.Column="1" Grid.Row="3"                            
+        <!--<Button Grid.Column="1" Grid.Row="3"                            
             Content="Download Entire Global list"
             Width="250"
             Height="24"
             Margin="0,0,4,0"
             Padding="0"
-            Command="{Binding DownloadEntireGlobalList}" />
+            Command="{Binding DownloadEntireGlobalList}" />-->
     </Grid>
 </Window>
