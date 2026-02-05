@@ -46,6 +46,8 @@ namespace Global_List_Editor.Model
 
         private string _nameField;
 
+        private bool _isSelected;
+
         public List<GLOBALLISTLISTITEM> ListItem
         {
             get
@@ -72,17 +74,26 @@ namespace Global_List_Editor.Model
             }
         }
 
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set
+            {
+                if (_isSelected != value)
+                {
+                    _isSelected = value;
+                    OnPropertyChanged(nameof(IsSelected));
+                }
+            }
+        }
 
         #region INotifyPropertyChanged Members
 
         public event PropertyChangedEventHandler PropertyChanged;
 
-        private void OnPropertyChanged(string propertyName)
+        protected void OnPropertyChanged(string propertyName)
         {
-            if (PropertyChanged != null)
-            {
-                PropertyChanged(this, new PropertyChangedEventArgs(propertyName));
-            }
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
 
         #endregion
@@ -106,6 +117,7 @@ namespace Global_List_Editor.Model
             }
         }
 
+        public bool IsSelected { get; set; }
 
         #region INotifyPropertyChanged Members
 

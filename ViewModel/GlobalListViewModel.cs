@@ -24,6 +24,7 @@ namespace Global_List_Editor.ViewModel
         private string _selectedEnvironment;
         private string _environmentUrl;
         private Model.GLOBALLIST _selectedGlobalList;
+        private List<Model.GLOBALLIST> _selectedGlobalLists = new();
         private List<string> _exportedListItems;
         private string _globalListSearchText;
         private string _exportedListItemsSearchText;
@@ -41,11 +42,26 @@ namespace Global_List_Editor.ViewModel
         }
         public Model.GLOBALLISTS GlobalLists
         {
-            get { return _globalLists; }
+            get => _globalLists;
             set
             {
                 _globalLists = value;
                 OnPropertyChanged(nameof(GlobalLists));
+
+                // Re-subscribe to PropertyChanged for each GLOBALLIST
+                if (_globalLists != null && _globalLists.GlobalList != null)
+                {
+                    foreach (var gl in _globalLists.GlobalList)
+                    {
+                        gl.PropertyChanged += (s, e) =>
+                        {
+                            if (e.PropertyName == nameof(GLOBALLIST.IsSelected))
+                            {
+                                SelectedGlobalLists = _globalLists.GlobalList.Where(x => x.IsSelected).ToList();
+                            }
+                        };
+                    }
+                }
             }
         }
 
@@ -91,7 +107,6 @@ namespace Global_List_Editor.ViewModel
             }
         }
 
-
         public string EnvironmentUrl
         {
             get { return _environmentUrl; }
@@ -129,6 +144,26 @@ namespace Global_List_Editor.ViewModel
                 {
                     ExportedListItems = new List<string>();
                 }
+            }
+        }
+
+        public List<Model.GLOBALLIST> SelectedGlobalLists
+        {
+            get => _selectedGlobalLists;
+            set
+            {
+                _selectedGlobalLists = value;
+                OnPropertyChanged(nameof(SelectedGlobalLists));
+
+                if(value.Count == 1)
+                {
+                    SelectedGlobalList = value.First();
+                }
+                else
+                {
+                    SelectedGlobalList = null;
+                }
+                OnPropertyChanged(nameof(SelectedGlobalList));
             }
         }
 
@@ -260,6 +295,20 @@ namespace Global_List_Editor.ViewModel
             {
                 Environments = new List<string>();
             }
+
+            if (_globalLists != null && _globalLists.GlobalList != null)
+            {
+                foreach (var gl in _globalLists.GlobalList)
+                {
+                    gl.PropertyChanged += (s, e) =>
+                    {
+                        if (e.PropertyName == nameof(Model.GLOBALLIST.IsSelected))
+                        {
+                            SelectedGlobalLists = _globalLists.GlobalList.Where(x => x.IsSelected).ToList();
+                        }
+                    };
+                }
+            }
         }
 
         private bool CanDownloadEntireGlobalList(object obj)
@@ -386,7 +435,6 @@ namespace Global_List_Editor.ViewModel
             }
         }
 
-
         private List<GLOBALLIST> GetGlobalListNames()
         {
             var globalListNames = new List<GLOBALLIST>();
@@ -506,6 +554,20 @@ namespace Global_List_Editor.ViewModel
                 GlobalLists.GlobalList = list;
                 OnPropertyChanged(nameof(FilteredGlobalLists));
                 OnPropertyChanged(nameof(GlobalLists));
+
+                if (_globalLists != null && _globalLists.GlobalList != null)
+                {
+                    foreach (var gl in _globalLists.GlobalList)
+                    {
+                        gl.PropertyChanged += (s, e) =>
+                        {
+                            if (e.PropertyName == nameof(Model.GLOBALLIST.IsSelected))
+                            {
+                                SelectedGlobalLists = _globalLists.GlobalList.Where(x => x.IsSelected).ToList();
+                            }
+                        };
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -514,6 +576,21 @@ namespace Global_List_Editor.ViewModel
                 GlobalLists.GlobalList = list;
                 OnPropertyChanged(nameof(FilteredGlobalLists));
                 OnPropertyChanged(nameof(GlobalLists));
+
+                if (_globalLists != null && _globalLists.GlobalList != null)
+                {
+                    foreach (var gl in _globalLists.GlobalList)
+                    {
+                        gl.PropertyChanged += (s, e) =>
+                        {
+                            if (e.PropertyName == nameof(Model.GLOBALLIST.IsSelected))
+                            {
+                                SelectedGlobalLists = _globalLists.GlobalList.Where(x => x.IsSelected).ToList();
+                            }
+                        };
+                    }
+                }
+
                 System.Windows.MessageBox.Show($"Error: {ex.Message}", "Error");
             }
         }
