@@ -25,10 +25,22 @@ namespace Global_List_Editor.ViewModel
         private string _environmentUrl;
         private Model.GLOBALLIST _selectedGlobalList;
         private List<Model.GLOBALLIST> _selectedGlobalLists = new();
-        private List<string> _exportedListItems;
+        private List<SelectableItem<string>> _exportedListItems;
         private string _globalListSearchText;
         private string _exportedListItemsSearchText;
         private string _downloadLocation;
+        private List<string> _selectedExportedListItems = new();
+
+        public List<string> SelectedExportedListItems
+        {
+            get => _selectedExportedListItems;
+            set
+            {
+                _selectedExportedListItems = value;
+                OnPropertyChanged(nameof(SelectedExportedListItems));
+                OnPropertyChanged(nameof(ShowDeleteExportedListItemButton));
+            }
+        }
 
         private bool _isLoading;
         public bool IsLoading
@@ -40,6 +52,7 @@ namespace Global_List_Editor.ViewModel
                 OnPropertyChanged(nameof(IsLoading));
             }
         }
+
         public Model.GLOBALLISTS GlobalLists
         {
             get => _globalLists;
@@ -142,7 +155,7 @@ namespace Global_List_Editor.ViewModel
                 }
                 else
                 {
-                    ExportedListItems = new List<string>();
+                    ExportedListItems = new List<SelectableItem<string>>();
                 }
             }
         }
@@ -167,7 +180,7 @@ namespace Global_List_Editor.ViewModel
             }
         }
 
-        public List<string> ExportedListItems
+        public List<SelectableItem<string>> ExportedListItems
         {
             get => _exportedListItems;
             set
@@ -213,19 +226,20 @@ namespace Global_List_Editor.ViewModel
                 ? GlobalLists.GlobalList
                 : GlobalLists.GlobalList?.Where(gl => gl.Name != null && gl.Name.Contains(GlobalListSearchText, StringComparison.OrdinalIgnoreCase));
 
-        public IEnumerable<string> FilteredExportedListItems =>
+        public IEnumerable<SelectableItem<string>> FilteredExportedListItems =>
             string.IsNullOrWhiteSpace(ExportedListItemsSearchText)
                 ? ExportedListItems
-                : ExportedListItems?.Where(item => item != null && item.Contains(ExportedListItemsSearchText, StringComparison.OrdinalIgnoreCase));
+                : ExportedListItems?.Where(item => item.Value != null && item.Value.Contains(ExportedListItemsSearchText, StringComparison.OrdinalIgnoreCase));
 
         public bool ShowAddExportedListItemButton =>
             !string.IsNullOrWhiteSpace(ExportedListItemsSearchText) &&
-            (ExportedListItems == null || !ExportedListItems.Any(item => item.Equals(ExportedListItemsSearchText, StringComparison.OrdinalIgnoreCase)));
+            (ExportedListItems == null || !ExportedListItems.Any(item => item.Value.Equals(ExportedListItemsSearchText, StringComparison.OrdinalIgnoreCase)));
 
         public bool ShowDeleteExportedListItemButton =>
-            !string.IsNullOrWhiteSpace(ExportedListItemsSearchText) &&
+            (SelectedExportedListItems != null && SelectedExportedListItems.Any()) ||
+            (!string.IsNullOrWhiteSpace(ExportedListItemsSearchText) &&
             ExportedListItems != null &&
-            ExportedListItems.Any(item => item.Equals(ExportedListItemsSearchText, StringComparison.OrdinalIgnoreCase));
+            ExportedListItems.Any(item => item.Value.Equals(ExportedListItemsSearchText, StringComparison.OrdinalIgnoreCase)));
 
         public ICommand ApplyChangesToAzureServer { get; }
 
@@ -237,8 +251,8 @@ namespace Global_List_Editor.ViewModel
             if (!string.IsNullOrEmpty(newItem) && SelectedGlobalList != null)
             {
                 // Add to in-memory list
-                var items = ExportedListItems?.ToList() ?? new List<string>();
-                items.Add(newItem);
+                var items = ExportedListItems?.ToList() ?? new List<SelectableItem<string>>();
+                items.Add(new SelectableItem<string> { Value = newItem });
                 ExportedListItems = items;
 
                 AddOrDeleteListItem(newItem, true);
@@ -259,8 +273,8 @@ namespace Global_List_Editor.ViewModel
             if (!string.IsNullOrEmpty(itemToDelete) && SelectedGlobalList != null)
             {
                 // Remove from in-memory list
-                var items = ExportedListItems?.ToList() ?? new List<string>();
-                var removed = items.RemoveAll(i => i.Equals(itemToDelete, StringComparison.OrdinalIgnoreCase));
+                var items = ExportedListItems?.ToList() ?? new List<SelectableItem<string>>();
+                var removed = items.RemoveAll(i => i.Value.Equals(itemToDelete, StringComparison.OrdinalIgnoreCase));
                 if (removed > 0)
                 {
                     ExportedListItems = items;
@@ -599,11 +613,30 @@ namespace Global_List_Editor.ViewModel
         {
             try
             {
-                ExportedListItems = GetListItemsForGlobalListName();
+                var items = GetListItemsForGlobalListName();
+                ExportedListItems = items.Select(item => new SelectableItem<string> { Value = item }).ToList();
+                SyncSelectedExportedListItems();
             }
             catch
             {
-                ExportedListItems = new List<string>();
+                ExportedListItems = new List<SelectableItem<string>>();
+            }
+        }
+
+        private void SyncSelectedExportedListItems()
+        {
+            foreach (var item in ExportedListItems)
+            {
+                item.PropertyChanged += (s, e) =>
+                {
+                    if (e.PropertyName == nameof(SelectableItem<string>.IsSelected))
+                    {
+                        SelectedExportedListItems = ExportedListItems
+                            .Where(x => x.IsSelected)
+                            .Select(x => x.Value)
+                            .ToList();
+                    }
+                };
             }
         }
 
